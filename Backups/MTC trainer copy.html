@@ -1,0 +1,1365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MTC Trainer</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
+        * { box-sizing: border-box; }
+        body, html { margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; font-family:'JetBrains Mono',monospace; }
+
+        #menu-layer { position:fixed; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; z-index:10; transition:opacity 0.8s ease; }
+        #menu-layer.hidden { opacity:0; pointer-events:none; }
+        .main-image { width:90%; object-fit:contain; margin-top:-30vh; }
+        .simulator-text { font-size:2.8rem; font-weight:700; letter-spacing:18px; text-transform:uppercase; margin-top:-8vh; color:#fff; text-shadow:0 0 15px rgba(255,255,255,0.4); }
+        .press-key { position:absolute; bottom:10vh; font-size:1.2rem; letter-spacing:5px; text-transform:uppercase; color:#fff; animation:pulse 3s ease-in-out infinite; }
+        .menu-container { display:none; flex-direction:column; gap:20px; margin-top:5vh; z-index:10; }
+        .menu-item { font-size:1.5rem; letter-spacing:8px; text-transform:uppercase; color:rgba(255,255,255,0.6); cursor:pointer; transition:all 0.3s ease; padding:10px 40px; border:1px solid transparent; text-align:center; }
+        .menu-item:hover { color:#fff; letter-spacing:12px; text-shadow:0 0 15px rgba(255,255,255,0.5); background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.2); }
+        @keyframes pulse { 0%,100%{opacity:0.2;} 50%{opacity:0.9;} }
+
+        #scene-layer { position:fixed; inset:0; display:none; z-index:5; }
+        #scene-layer.active { display:block; }
+        #three-canvas { width:100%!important; height:100%!important; display:block; }
+
+        #gunner-hud { position:fixed; inset:0; z-index:20; pointer-events:none; display:none; }
+        #gunner-hud.active { display:block; }
+
+        /* Scope */
+        #scope-overlay { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; opacity:0; transition:opacity 0.12s ease; pointer-events:none; }
+        #scope-overlay.aiming { opacity:1; }
+        #scope-svg { width:min(80vh,80vw); height:min(80vh,80vw); }
+        #vignette { position:absolute; inset:0; background:radial-gradient(ellipse at center,transparent 35%,rgba(0,0,0,0.75) 100%); transition:background 0.2s ease; pointer-events:none; }
+        #vignette.aiming { background:radial-gradient(ellipse at center,transparent 20%,rgba(0,0,0,0.97) 62%); }
+
+        /* Crosshair (always visible when not aiming) */
+        #crosshair { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:14px; height:14px; pointer-events:none; opacity:1; transition:opacity 0.12s; }
+        #crosshair.hidden { opacity:0; }
+        #crosshair::before { content:''; position:absolute; left:6px; top:0; width:2px; height:14px; background:rgba(180,255,120,0.7); }
+        #crosshair::after  { content:''; position:absolute; left:0; top:6px; width:14px; height:2px; background:rgba(180,255,120,0.7); }
+
+        /* HUD panels */
+        #hud-info { position:absolute; bottom:40px; left:40px; color:rgba(180,255,120,0.85); font-size:0.85rem; letter-spacing:3px; line-height:1.9; text-shadow:0 0 8px rgba(100,255,50,0.6); }
+        #ammo-counter { position:absolute; bottom:40px; right:40px; color:rgba(180,255,120,0.85); font-size:0.85rem; letter-spacing:3px; text-align:right; line-height:1.9; text-shadow:0 0 8px rgba(100,255,50,0.6); }
+
+        /* Shell bar — hidden until reload needed */
+        #shell-bar { position:absolute; bottom:20px; left:50%; transform:translateX(-50%); display:none; gap:6px; align-items:flex-end; }
+        .shell-slot { width:140px; height:160px; border:1px solid rgba(180,255,120,0.35); display:flex; flex-direction:column; align-items:center; justify-content:center; font-size:1rem; letter-spacing:1px; color:rgba(180,255,120,0.5); background:rgba(0,0,0,0.55); transition:all 0.15s; gap:8px; }
+        .shell-slot .snum { font-size:1.8rem; font-weight:700; }
+        .shell-slot .stype { font-size:1.1rem; }
+        .shell-slot.active { border-color:rgba(180,255,120,0.95); color:rgba(180,255,120,1); background:rgba(0,40,0,0.7); box-shadow:0 0 8px rgba(100,255,50,0.4); }
+
+        /* Target / aim badges */
+        #target-indicator { position:absolute; top:28px; left:50%; transform:translateX(-50%); color:rgba(255,80,80,0.9); font-size:0.72rem; letter-spacing:5px; text-transform:uppercase; text-shadow:0 0 10px rgba(255,50,50,0.8); animation:targetPulse 1.5s ease-in-out infinite; display:none; }
+        @keyframes targetPulse { 0%,100%{opacity:0.4;} 50%{opacity:1;} }
+        #aim-badge { position:absolute; top:28px; left:50%; transform:translateX(-50%); color:rgba(180,255,120,0.65); font-size:0.7rem; letter-spacing:5px; text-transform:uppercase; display:none; }
+        #aim-badge.show { display:block; }
+
+        /* Muzzle flash / hit */
+        #fire-flash { position:absolute; inset:0; background:rgba(255,220,80,0); pointer-events:none; transition:background 0.04s; }
+        #fire-flash.flash { background:rgba(255,220,80,0.28); }
+        #hit-marker { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); color:#ff3333; font-size:2.2rem; opacity:0; transition:opacity 0.07s; pointer-events:none; }
+        #hit-marker.show { opacity:1; }
+
+        /* Controls label */
+        #controls-label { position:absolute; top:28px; right:38px; color:rgba(180,255,120,0.38); font-size:0.66rem; letter-spacing:2px; line-height:2.1; text-align:right; }
+
+        /* Kill log */
+        #kill-log { position:absolute; top:75px; left:38px; color:rgba(255,80,80,0.85); font-size:0.72rem; letter-spacing:3px; line-height:2.2; }
+        .kill-entry { animation:fadeKill 4s forwards; }
+        @keyframes fadeKill { 0%{opacity:1;} 70%{opacity:1;} 100%{opacity:0;} }
+
+        /* Health bar */
+        #health-bar-wrap { position:absolute; bottom:120px; right:40px; width:220px; text-align:right; }
+        #health-label { color:rgba(255,80,80,0.9); font-size:0.85rem; letter-spacing:4px; margin-bottom:6px; font-weight:700; }
+        #health-bar-bg { width:100%; height:6px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,80,80,0.3); }
+        #health-bar-fill { height:100%; background:#ff4444; width:100%; box-shadow:0 0 10px rgba(255,50,50,0.5); transition:width 0.3s ease; }
+
+        /* Reload bar */
+        #reload-bar-wrap { position:absolute; bottom:90px; left:50%; transform:translateX(-50%); width:320px; text-align:center; display:none; }
+        #reload-label { color:rgba(180,255,120,0.9); font-size:0.85rem; letter-spacing:6px; margin-bottom:8px; font-weight:700; }
+        #reload-bar-bg { width:100%; height:8px; background:rgba(255,255,255,0.12); border:1px solid rgba(180,255,120,0.3); }
+        #reload-bar-fill { height:100%; background:#b4ff78; width:0%; box-shadow:0 0 12px rgba(100,255,50,0.7); transition:width 0.05s linear; }
+
+        /* Back button */
+        #back-btn { position:absolute; top:28px; left:38px; color:rgba(255,100,100,0.7); font-size:0.72rem; letter-spacing:4px; text-transform:uppercase; cursor:pointer; pointer-events:all; padding:7px 14px; border:1px solid rgba(255,100,100,0.3); transition:all 0.3s; }
+        #back-btn:hover { color:#ff4444; border-color:rgba(255,100,100,0.8); background:rgba(255,50,50,0.1); }
+
+        /* Fades */
+        #intro-fade { position:fixed; inset:0; background:#000; z-index:50; pointer-events:none; opacity:0; transition:opacity 0.8s ease; }
+        #loading-msg { position:fixed; inset:0; display:none; align-items:center; justify-content:center; z-index:55; color:rgba(180,255,120,0.8); font-size:1rem; letter-spacing:6px; text-transform:uppercase; background:#000; }
+        #loading-msg.active { display:flex; }
+    </style>
+</head>
+<body>
+
+<div id="intro-fade"></div>
+<div id="loading-msg">LOADING...</div>
+
+<!-- MENU -->
+<div id="menu-layer">
+    <img src="MainMenuBackGround.png" class="main-image" onerror="this.style.display='none'">
+    <div class="simulator-text">Training Simulator</div>
+    <div id="press-key-prompt" class="press-key">Press any key to begin</div>
+    <div id="main-menu" class="menu-container">
+        <div class="menu-item" onclick="selectEra('WW2')">WW2</div>
+        <div class="menu-item" onclick="selectEra('Cold War')">Cold War</div>
+        <div class="menu-item" onclick="selectEra('Modern')">Modern</div>
+        <div class="press-key" style="position:static;margin-top:40px;font-size:1rem;cursor:default;">Select Era</div>
+    </div>
+    <div id="role-menu" class="menu-container">
+        <div id="role-era-label" style="font-size:2.5rem;letter-spacing:15px;font-weight:700;text-transform:uppercase;color:#fff;margin-bottom:30px;text-shadow:0 0 15px rgba(255,255,255,0.4);cursor:default;"></div>
+        <div class="menu-item" onclick="startRole('Gunner')">Gunner</div>
+        <div class="menu-item" onclick="startRole('Driver')">Driver</div>
+        <div class="menu-item" onclick="startRole('Commander')">Commander</div>
+        <div class="menu-item" onclick="startRole('Loader')">Loader</div>
+        <div class="menu-item" onclick="backToEras()" style="margin-top:20px;font-size:1rem;color:#ff4444;opacity:0.6;">Back</div>
+        <div class="press-key" style="position:static;margin-top:40px;font-size:1rem;cursor:default;">Select Role</div>
+    </div>
+</div>
+
+<!-- SCENE -->
+<div id="scene-layer"><canvas id="three-canvas"></canvas></div>
+
+<!-- HUD -->
+<div id="gunner-hud">
+    <div id="vignette"></div>
+    <div id="fire-flash"></div>
+
+    <div id="scope-overlay">
+        <svg id="scope-svg" viewBox="0 0 600 600" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+                <mask id="scope-mask">
+                    <rect width="600" height="600" fill="white"/>
+                    <circle cx="300" cy="300" r="238" fill="black"/>
+                </mask>
+            </defs>
+            <rect width="600" height="600" fill="rgba(0,0,0,0.93)" mask="url(#scope-mask)"/>
+            <circle cx="300" cy="300" r="238" fill="none" stroke="rgba(180,255,120,0.6)" stroke-width="2"/>
+            <circle cx="300" cy="300" r="235" fill="none" stroke="rgba(180,255,120,0.15)" stroke-width="1"/>
+            <!-- crosshairs -->
+            <line x1="62" y1="300" x2="538" y2="300" stroke="rgba(180,255,120,0.75)" stroke-width="1"/>
+            <line x1="300" y1="62" x2="300" y2="538" stroke="rgba(180,255,120,0.75)" stroke-width="1"/>
+            <!-- mil dots horizontal -->
+            <circle cx="220" cy="300" r="3" fill="rgba(180,255,120,0.8)"/>
+            <circle cx="380" cy="300" r="3" fill="rgba(180,255,120,0.8)"/>
+            <circle cx="160" cy="300" r="2" fill="rgba(180,255,120,0.45)"/>
+            <circle cx="440" cy="300" r="2" fill="rgba(180,255,120,0.45)"/>
+            <!-- mil dots vertical -->
+            <circle cx="300" cy="220" r="3" fill="rgba(180,255,120,0.8)"/>
+            <circle cx="300" cy="380" r="3" fill="rgba(180,255,120,0.8)"/>
+            <circle cx="300" cy="160" r="2" fill="rgba(180,255,120,0.45)"/>
+            <circle cx="300" cy="440" r="2" fill="rgba(180,255,120,0.45)"/>
+            <!-- stadia -->
+            <line x1="62" y1="280" x2="82" y2="280" stroke="rgba(180,255,120,0.6)" stroke-width="1"/>
+            <line x1="62" y1="260" x2="74" y2="260" stroke="rgba(180,255,120,0.35)" stroke-width="1"/>
+            <line x1="62" y1="320" x2="82" y2="320" stroke="rgba(180,255,120,0.6)" stroke-width="1"/>
+            <line x1="62" y1="340" x2="74" y2="340" stroke="rgba(180,255,120,0.35)" stroke-width="1"/>
+            <line x1="538" y1="280" x2="518" y2="280" stroke="rgba(180,255,120,0.6)" stroke-width="1"/>
+            <line x1="538" y1="260" x2="526" y2="260" stroke="rgba(180,255,120,0.35)" stroke-width="1"/>
+            <line x1="538" y1="320" x2="518" y2="320" stroke="rgba(180,255,120,0.6)" stroke-width="1"/>
+            <line x1="538" y1="340" x2="526" y2="340" stroke="rgba(180,255,120,0.35)" stroke-width="1"/>
+            <line x1="280" y1="538" x2="280" y2="518" stroke="rgba(180,255,120,0.6)" stroke-width="1"/>
+            <line x1="320" y1="538" x2="320" y2="518" stroke="rgba(180,255,120,0.6)" stroke-width="1"/>
+            <!-- centre dot -->
+            <circle cx="300" cy="300" r="2.5" fill="rgba(255,80,80,0.9)"/>
+            <!-- range labels -->
+            <text x="88" y="284" fill="rgba(180,255,120,0.6)" font-size="10" font-family="monospace">400</text>
+            <text x="88" y="324" fill="rgba(180,255,120,0.6)" font-size="10" font-family="monospace">600</text>
+            <text x="112" y="492" fill="rgba(180,255,120,0.4)" font-size="11" font-family="monospace">4x</text>
+        </svg>
+    </div>
+
+    <div id="crosshair"></div>
+    <div id="aim-badge">[ AIMING ]</div>
+    <div id="target-indicator">TARGET ACQUIRED</div>
+    <div id="hit-marker">&#x2715;</div>
+
+    <div id="hud-info">
+        <div>ERA &nbsp;&nbsp;: WW2</div>
+        <div>ROLE &nbsp;: GUNNER</div>
+        <div id="kills-display">KILLS &nbsp;: 0</div>
+        <div id="bearing-display">BRG &nbsp;&nbsp;: 000°</div>
+        <div id="elev-display">ELEV &nbsp;: +0.0°</div>
+    </div>
+
+    <div id="ammo-counter">
+        <div id="shell-name-display">SHELL : APHE</div>
+        <div id="ammo-display">AMMO &nbsp;: 35</div>
+        <div id="status-display">STATUS: READY</div>
+    </div>
+
+    <div id="health-bar-wrap">
+        <div id="health-label">HULL INTEGRITY</div>
+        <div id="health-bar-bg"><div id="health-bar-fill"></div></div>
+    </div>
+
+    <div id="shell-bar"></div>
+
+    <div id="reload-bar-wrap">
+        <div id="reload-label">RELOADING</div>
+        <div id="reload-bar-bg"><div id="reload-bar-fill"></div></div>
+    </div>
+
+    <div id="controls-label">
+        X &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;— TOGGLE AIM<br>
+        F &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;— FIRE<br>
+        MB2 &nbsp;&nbsp;&nbsp;— MOVE TO<br>
+        W / S — ELEVATION<br>
+        A / D — TRAVERSE<br>
+        1–9 &nbsp;&nbsp;— SHELL TYPE<br>
+        ESC &nbsp;&nbsp;— BACK
+    </div>
+
+    <div id="kill-log"></div>
+    <div id="back-btn" onclick="exitScene()">&#9668; EXIT</div>
+</div>
+
+<!-- Three.js dual-CDN loader -->
+<script>
+(function(){
+    function load(src, fallback) {
+        var s = document.createElement('script');
+        s.src = src;
+        s.onload = function(){ window._THREE_OK = true; };
+        s.onerror = function(){ if(fallback) fallback(); };
+        document.head.appendChild(s);
+    }
+    load('https://unpkg.com/three@0.128.0/build/three.min.js', function(){
+        load('https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js', function(){
+            document.getElementById('loading-msg').textContent = 'ERROR: THREE.JS FAILED TO LOAD';
+            document.getElementById('loading-msg').classList.add('active');
+        });
+    });
+})();
+</script>
+
+<script>
+// ─────────────────────────────────────────────
+// SHELL TYPES  (9 WW2-era rounds)
+// ─────────────────────────────────────────────
+// pen = penetration in mm at standard range
+var SHELLS = [
+    { key:'1', name:'AP',     color:0xffdd44, speed:2.2, splash:0,   reload:2.5, ammo:50, pen:110 },
+    { key:'2', name:'APHEBC', color:0xff8800, speed:2.1, splash:1.8, reload:3.2, ammo:35, pen:130 },
+    { key:'3', name:'HE',     color:0xff3300, speed:1.6, splash:6.0, reload:3.5, ammo:30, pen:30  },
+    { key:'4', name:'SMOKE',  color:0xdddddd, speed:1.4, splash:0,   reload:2.0, ammo:12, pen:0   }
+];
+
+// Panzer IV armour zones (mm). Front heaviest, sides/rear thinner, top weak.
+// Each zone: { offsetZ relative to tank centre, halfDepth, halfWidth, halfHeight, yOffset, armour }
+// We test in order — first zone the bullet hits determines armour value.
+var ARMOUR_ZONES = [
+    // Tracks (external)
+    { label:'tracks', armour:20, zMin:-2.8, zMax:2.8, xHalf:1.9, yMin:0.1, yMax:0.9, sideOnly:true },
+    // Front hull
+    { label:'hull front', armour:80,  zMin: 1.5,  zMax: 3.0,  xHalf:2.0, yMin:0.1, yMax:1.8 },
+    // Front turret / mantlet
+    { label:'turret front', armour:50, zMin: 0.5, zMax: 2.2,  xHalf:1.1, yMin:1.6, yMax:2.9 },
+    // Ammo rack (internal — treat as critical zone behind hull side)
+    { label:'ammo rack', armour:40, zMin:-0.8, zMax:0.8, xHalf:1.5, yMin:0.4, yMax:1.4, sideOnly:true },
+    // Side hull
+    { label:'hull side',  armour:30,  zMin:-2.8,  zMax: 2.8,  xHalf:2.1, yMin:0.1, yMax:1.8, sideOnly:true },
+    // Side turret
+    { label:'turret side',armour:30,  zMin:-1.3,  zMax: 1.3,  xHalf:1.2, yMin:1.6, yMax:2.9, sideOnly:true },
+    // Rear (engine)
+    { label:'rear engine', armour:20,  zMin:-3.0,  zMax:-1.5,  xHalf:2.0, yMin:0.1, yMax:1.8 },
+    // Top / cupola (always weak)
+    { label:'top',        armour:15,  zMin:-2.8,  zMax: 2.8,  xHalf:2.0, yMin:1.8, yMax:3.2 }
+];
+
+// ─────────────────────────────────────────────
+// STATE
+// ─────────────────────────────────────────────
+var currentEra='', currentRole='';
+var scene3D=null, renderer3D=null, animFrameId=null, clock3D, camera3D;
+var kills=0, reloading=false, isLoaded=true, playerHealth=100;
+var currentShellIdx=0, shellAmmo=[];
+var enemyMeshes=[], bullets=[], enemyBullets=[];
+var playerTankGroup=null, playerTurretGroup=null, playerBarrelGroup=null;
+var yaw=0, pitch=0;
+var isAiming=false, keysDown={};
+var TRAVERSE_SPEED=0.014, ELEV_SPEED=0.010;
+var PITCH_MIN=-0.35, PITCH_MAX=0.55;
+
+// Player position & movement
+var HILL_X=0, HILL_Z=18;
+var playerTargetPos=null, moveBeacon=null, terrainMesh=null;
+var PLAYER_MOVE_SPEED=0.15;
+
+// Smoke clouds array: {x, z, radius, life, maxLife, mesh}
+var smokeClouds=[];
+
+// ─────────────────────────────────────────────
+// SHELL BAR
+// ─────────────────────────────────────────────
+function buildShellBar() {
+    shellAmmo = [];
+    var bar = document.getElementById('shell-bar');
+    bar.innerHTML = '';
+    for (var i = 0; i < SHELLS.length; i++) {
+        shellAmmo.push(SHELLS[i].ammo);
+        var slot = document.createElement('div');
+        slot.className = 'shell-slot' + (i===0?' active':'');
+        slot.id = 'slot-'+i;
+        slot.innerHTML = '<span class="snum">'+SHELLS[i].key+'</span><span class="stype">'+SHELLS[i].name+'</span>'+(SHELLS[i].pen>0?'<span style="font-size:0.65rem;opacity:0.7;">'+SHELLS[i].pen+'mm</span>':'<span style="font-size:0.65rem;opacity:0.7;">—</span>');
+        bar.appendChild(slot);
+    }
+    updateShellHUD();
+}
+function selectShell(idx) {
+    if (idx < 0 || idx >= SHELLS.length) return;
+    document.getElementById('slot-'+currentShellIdx).classList.remove('active');
+    currentShellIdx = idx;
+    document.getElementById('slot-'+currentShellIdx).classList.add('active');
+    updateShellHUD();
+    // If gun is unloaded and shell has ammo, start reloading
+    if (!isLoaded && !reloading && shellAmmo[currentShellIdx] > 0) {
+        document.getElementById('shell-bar').style.display='none';
+        startReload(SHELLS[currentShellIdx].reload);
+    }
+}
+function updateShellHUD() {
+    document.getElementById('shell-name-display').textContent = 'SHELL : '+SHELLS[currentShellIdx].name;
+    document.getElementById('ammo-display').textContent       = 'AMMO  : '+shellAmmo[currentShellIdx];
+}
+
+// ─────────────────────────────────────────────
+// MENU
+// ─────────────────────────────────────────────
+function startMenu() {
+    document.getElementById('press-key-prompt').style.display='none';
+    document.getElementById('main-menu').style.display='flex';
+}
+window.addEventListener('keydown', startMenu, {once:true});
+window.addEventListener('mousedown', startMenu, {once:true});
+
+function selectEra(era) {
+    currentEra=era;
+    document.getElementById('main-menu').style.display='none';
+    document.getElementById('role-menu').style.display='flex';
+    document.getElementById('role-era-label').innerText=era;
+}
+function backToEras() {
+    document.getElementById('role-menu').style.display='none';
+    document.getElementById('main-menu').style.display='flex';
+}
+function startRole(role) {
+    currentRole=role;
+    if (currentEra==='WW2' && role==='Gunner') launchWW2Gunner();
+    else alert(currentEra+' — '+role+'\nComing soon!');
+}
+
+// ─────────────────────────────────────────────
+// LAUNCH / EXIT
+// ─────────────────────────────────────────────
+function launchWW2Gunner() {
+    var fade = document.getElementById('intro-fade');
+    var msg  = document.getElementById('loading-msg');
+    if (!window.THREE) {
+        msg.textContent='LOADING...'; msg.classList.add('active');
+        var iv = setInterval(function(){
+            if (window.THREE) { clearInterval(iv); msg.classList.remove('active'); doLaunch(fade); }
+        }, 80);
+        return;
+    }
+    doLaunch(fade);
+}
+function doLaunch(fade) {
+    fade.style.transition='opacity 0.5s ease'; fade.style.opacity='1';
+    setTimeout(function(){
+        document.getElementById('menu-layer').classList.add('hidden');
+        document.getElementById('scene-layer').classList.add('active');
+        document.getElementById('gunner-hud').classList.add('active');
+        buildShellBar();
+        requestAnimationFrame(function(){ requestAnimationFrame(function(){
+            initWW2Scene();
+            fade.style.transition='opacity 1s ease'; fade.style.opacity='0';
+        }); });
+    }, 560);
+}
+function exitScene() {
+    setAiming(false);
+    document.removeEventListener('keydown', onKeyDown);
+    document.removeEventListener('keyup',   onKeyUp);
+    document.removeEventListener('mousemove', onMouseMove);
+    document.removeEventListener('mousedown', onMouseDown);
+    window.removeEventListener('blur', onBlur);
+    var fade = document.getElementById('intro-fade');
+    fade.style.transition='opacity 0.5s ease'; fade.style.opacity='1';
+    setTimeout(function(){
+        if (animFrameId) cancelAnimationFrame(animFrameId);
+        if (renderer3D) { renderer3D.dispose(); renderer3D=null; }
+        scene3D=null; enemyMeshes=[]; bullets=[]; enemyBullets=[]; smokeClouds=[];
+        kills=0; reloading=false; isLoaded=true; currentShellIdx=0;
+        playerHealth=100;
+        document.getElementById('health-bar-fill').style.width = '100%';
+        yaw=0; pitch=0; keysDown={};
+        playerTankGroup=null; playerTurretGroup=null; playerBarrelGroup=null;
+        playerTargetPos=null; moveBeacon=null; terrainMesh=null;
+        document.getElementById('scene-layer').classList.remove('active');
+        document.getElementById('gunner-hud').classList.remove('active');
+        document.getElementById('kills-display').textContent  ='KILLS  : 0';
+        document.getElementById('status-display').textContent ='STATUS: READY';
+        document.getElementById('kill-log').innerHTML='';
+        document.getElementById('target-indicator').style.display='none';
+        document.getElementById('reload-bar-wrap').style.display='none';
+        document.getElementById('shell-bar').style.display='none';
+        document.getElementById('aim-badge').classList.remove('show');
+        document.getElementById('crosshair').classList.remove('hidden');
+        document.getElementById('menu-layer').classList.remove('hidden');
+        fade.style.transition='opacity 0.8s ease'; fade.style.opacity='0';
+    }, 600);
+}
+
+// ─────────────────────────────────────────────
+// TERRAIN HEIGHT  (analytical — must match buildTerrain exactly)
+// ─────────────────────────────────────────────
+function rnd(a,b){ return a+Math.random()*(b-a); }
+
+function getTerrainHeight(x,z) {
+    var h = Math.sin(x*0.12)*Math.cos(z*0.09)*1.2
+          + Math.sin(x*0.04+0.5)*Math.sin(z*0.06+1)*2.0
+          + Math.cos(x*0.07-1)*Math.sin(z*0.05+2)*0.8;
+    // Expanded hill at (0, 18)
+    var dx=x-0, dz=z-18;
+    var d2=dx*dx+dz*dz;
+    h += Math.max(0, 15-Math.sqrt(d2)*0.4)*Math.exp(-d2/400);
+    return h;
+}
+
+// ─────────────────────────────────────────────
+// BEACON & CLICK MOVEMENT
+// ─────────────────────────────────────────────
+function createBeacon(pos) {
+    if (moveBeacon) {
+        scene3D.remove(moveBeacon);
+    }
+    var g = new THREE.Group();
+    // Glowing ring
+    var ring = new THREE.Mesh(
+        new THREE.TorusGeometry(2, 0.1, 16, 32),
+        new THREE.MeshBasicMaterial({color: 0x00ffff, transparent: true, opacity: 0.8})
+    );
+    ring.rotation.x = -Math.PI/2;
+    g.add(ring);
+    
+    // Light column
+    var col = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.1, 0.5, 40, 8),
+        new THREE.MeshBasicMaterial({color: 0x00ffff, transparent: true, opacity: 0.3})
+    );
+    col.position.y = 20;
+    g.add(col);
+
+    var gy = getTerrainHeight(pos.x, pos.z);
+    g.position.set(pos.x, gy + 0.1, pos.z);
+    scene3D.add(g);
+    moveBeacon = g;
+}
+
+function onMouseDown(e) {
+    if (!scene3D || e.button !== 1) return; // Middle mouse only
+    
+    var raycaster = new THREE.Raycaster();
+    var mouse = new THREE.Vector2();
+    mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+    mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+    
+    raycaster.setFromCamera(mouse, camera3D);
+    var intersects = raycaster.intersectObject(terrainMesh);
+    
+    if (intersects.length > 0) {
+        var pt = intersects[0].point;
+        playerTargetPos = { x: pt.x, z: pt.z };
+        createBeacon(playerTargetPos);
+    }
+}
+
+// ─────────────────────────────────────────────
+// INIT SCENE
+// ─────────────────────────────────────────────
+function initWW2Scene() {
+    var canvas=document.getElementById('three-canvas');
+    var W=window.innerWidth, H=window.innerHeight;
+
+    renderer3D = new THREE.WebGLRenderer({canvas:canvas, antialias:true});
+    renderer3D.setSize(W,H);
+    renderer3D.shadowMap.enabled=true;
+    renderer3D.shadowMap.type=THREE.PCFSoftShadowMap;
+    renderer3D.setPixelRatio(Math.min(window.devicePixelRatio,2));
+
+    scene3D = new THREE.Scene();
+    scene3D.fog = new THREE.FogExp2(0xc8d8e8, 0.004);
+    scene3D.background = new THREE.Color(0x87CEEB);
+
+    camera3D = new THREE.PerspectiveCamera(55,W/H,0.1,500);
+    var hy = getTerrainHeight(HILL_X, HILL_Z);
+    camera3D.position.set(HILL_X, hy+3.2, HILL_Z);
+    yaw=0; pitch=0.08;
+    camera3D.rotation.order='YXZ';
+    camera3D.rotation.y=yaw; camera3D.rotation.x=pitch; camera3D.rotation.z=0;
+
+    clock3D = new THREE.Clock();
+    buildWW2World();
+    setupControls();
+    window.addEventListener('resize', onResize3D);
+    animate3D();
+}
+
+// ─────────────────────────────────────────────
+// WORLD
+// ─────────────────────────────────────────────
+function buildWW2World() {
+    // Lighting
+    scene3D.add(new THREE.AmbientLight(0xd4c89a, 0.55));
+    var sun = new THREE.DirectionalLight(0xfff5cc, 1.1);
+    sun.position.set(80,130,60); sun.castShadow=true;
+    sun.shadow.mapSize.set(2048,2048);
+    sun.shadow.camera.near=0.5; sun.shadow.camera.far=500;
+    sun.shadow.camera.left=-200; sun.shadow.camera.right=200;
+    sun.shadow.camera.top=200;  sun.shadow.camera.bottom=-200;
+    scene3D.add(sun);
+    scene3D.add(new THREE.DirectionalLight(0x8fa8c8, 0.25));
+
+    buildTerrain();
+    buildSky();
+
+    // Trees — dense forest flanking the valley, clear firing lane ahead
+    for (var t=0; t<500; t++) {
+        var tx=rnd(-180,180), tz=rnd(-180,100);
+        if (Math.sqrt((tx-HILL_X)*(tx-HILL_X)+(tz-HILL_Z)*(tz-HILL_Z)) < 14) continue;
+        if (Math.abs(tx)<18 && tz<8) continue; // keep valley lane clear
+        addTree(tx,tz);
+    }
+
+    // Sandbag emplacement around player hill crest
+    addSandbags(-3, HILL_Z-3, 0);
+    addSandbags( 3, HILL_Z-3, 0);
+    addSandbags( 0, HILL_Z-5, Math.PI/2);
+
+    // Ruins & cover in the valley
+    addWallRuins( 28,-70,0);       addWallRuins(-42,-85,Math.PI/5);
+    addWallRuins(  8,-110,Math.PI/3); addWallRuins(-60,-95,0.2);
+
+    // Craters
+    for (var c=0; c<18; c++) addCrater(rnd(-80,80), rnd(-35,-150));
+
+    // Dirt road through valley centre
+    var roadMat = new THREE.MeshLambertMaterial({color:0x6a6050});
+    var road = new THREE.Mesh(new THREE.PlaneGeometry(6,220), roadMat);
+    road.rotation.x=-Math.PI/2; road.position.set(0,0.04,-80);
+    scene3D.add(road);
+
+    // Player tank on hill
+    var hy = getTerrainHeight(HILL_X, HILL_Z);
+    buildPlayerTank(HILL_X, hy, HILL_Z);
+
+    // Queue first wave — 5 tanks entering from edges with staggered delays
+    queueWave(5, 2);
+}
+
+function buildTerrain() {
+    var geo = new THREE.PlaneGeometry(400,400,120,120);
+    var pos = geo.attributes.position;
+    for (var i=0; i<pos.count; i++) {
+        var lx=pos.getX(i), ly=pos.getY(i);
+        pos.setZ(i, getTerrainHeight(lx,-ly));
+    }
+    geo.computeVertexNormals();
+    terrainMesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({color:0x5a6b3a}));
+    terrainMesh.rotation.x=-Math.PI/2; terrainMesh.receiveShadow=true;
+    scene3D.add(terrainMesh);
+    // Dirt patches
+    var dm = new THREE.MeshLambertMaterial({color:0x7a6040});
+    for (var d=0; d<24; d++) {
+        var p = new THREE.Mesh(new THREE.CircleGeometry(rnd(2,8),8), dm);
+        p.rotation.x=-Math.PI/2; p.position.set(rnd(-90,90),0.04,rnd(-25,-145));
+        scene3D.add(p);
+    }
+}
+
+function buildSky() {
+    scene3D.add(new THREE.Mesh(
+        new THREE.SphereGeometry(450,16,8),
+        new THREE.MeshBasicMaterial({color:0x87CEEB, side:THREE.BackSide})
+    ));
+    var cmat = new THREE.MeshBasicMaterial({color:0xc8d4e0,transparent:true,opacity:0.65});
+    for (var i=0; i<30; i++) {
+        var g = new THREE.Group();
+        for (var c=0; c<Math.floor(rnd(3,7)); c++) {
+            var cm = new THREE.Mesh(new THREE.SphereGeometry(rnd(6,15),7,5), cmat);
+            cm.position.set(rnd(-24,24),rnd(-5,5),rnd(-24,24)); g.add(cm);
+        }
+        g.position.set(rnd(-280,280),rnd(70,140),rnd(-280,280));
+        scene3D.add(g);
+    }
+}
+
+function addTree(x,z) {
+    var gy=getTerrainHeight(x,z), h=rnd(3,6.5);
+    var trunk = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.14,0.28,h,6),
+        new THREE.MeshLambertMaterial({color:0x4a3520})
+    );
+    trunk.position.set(x,gy+h/2,z); trunk.castShadow=true; scene3D.add(trunk);
+    var lvls=Math.floor(rnd(2,4));
+    for (var l=0; l<lvls; l++) {
+        var r=(lvls-l)*rnd(1.1,2.0), ch=r*1.5;
+        var cone = new THREE.Mesh(
+            new THREE.ConeGeometry(r,ch,7),
+            new THREE.MeshLambertMaterial({color:new THREE.Color(0.15+Math.random()*0.08, 0.28+Math.random()*0.12, 0.07)})
+        );
+        cone.position.set(x,gy+h+l*(ch*0.45),z); cone.castShadow=true; scene3D.add(cone);
+    }
+}
+
+function addWallRuins(x,z,ry) {
+    var mat = new THREE.MeshLambertMaterial({color:0x8a7a66});
+    for (var i=0; i<Math.floor(rnd(3,6)); i++) {
+        var w=rnd(1.5,3), h=rnd(1,3.5);
+        var m = new THREE.Mesh(new THREE.BoxGeometry(w,h,0.4), mat);
+        m.position.set(x+i*3.2, getTerrainHeight(x+i*3.2,z)+h/2, z);
+        m.rotation.y=ry+rnd(-0.1,0.1);
+        m.castShadow=true; m.receiveShadow=true; scene3D.add(m);
+    }
+}
+
+function addSandbags(x,z,ry) {
+    var mat = new THREE.MeshLambertMaterial({color:0x9a8856});
+    var gy = getTerrainHeight(x,z);
+    for (var i=0; i<6; i++) {
+        var m = new THREE.Mesh(new THREE.SphereGeometry(0.35,6,4), mat);
+        m.scale.set(1.4,0.8,1);
+        m.position.set(x+(i%3)*0.75, gy+(i<3?0.28:0.62), z+Math.floor(i/3)*0.4);
+        m.rotation.y=ry; m.castShadow=true; scene3D.add(m);
+    }
+}
+
+function addCrater(x,z) {
+    var r=rnd(1.5,4);
+    var gy=getTerrainHeight(x,z);
+    var m = new THREE.Mesh(new THREE.CircleGeometry(r,12), new THREE.MeshLambertMaterial({color:0x5a4a30}));
+    m.rotation.x=-Math.PI/2; m.position.set(x,gy+0.04,z); scene3D.add(m);
+    var rim = new THREE.Mesh(new THREE.TorusGeometry(r,r*0.14,6,14), new THREE.MeshLambertMaterial({color:0x6a5a3a}));
+    rim.rotation.x=-Math.PI/2; rim.position.set(x,gy+0.1,z); scene3D.add(rim);
+}
+
+// ─────────────────────────────────────────────
+// PLAYER TANK
+// ─────────────────────────────────────────────
+function buildPlayerTank(x,y,z) {
+    var g = new THREE.Group();
+    var steel = new THREE.MeshLambertMaterial({color:0x4a5535});
+    var dark  = new THREE.MeshLambertMaterial({color:0x2e3322});
+    var track = new THREE.MeshLambertMaterial({color:0x1e1e14});
+
+    var hull = new THREE.Mesh(new THREE.BoxGeometry(3.6,1.0,5.5), steel);
+    hull.position.y=0.9; hull.castShadow=true; g.add(hull);
+
+    // Slope the front hull plate
+    var front = new THREE.Mesh(new THREE.BoxGeometry(3.6,0.7,0.3), steel);
+    front.position.set(0,1.05,2.75); front.rotation.x=0.45; g.add(front);
+
+    // Tracks
+    [-1.9,1.9].forEach(function(tx){
+        var trk = new THREE.Mesh(new THREE.BoxGeometry(0.42,0.65,5.8), track);
+        trk.position.set(tx,0.5,0); g.add(trk);
+        for (var w=-2;w<=2;w++) {
+            var wm = new THREE.Mesh(new THREE.CylinderGeometry(0.38,0.38,0.25,10), track);
+            wm.rotation.z=Math.PI/2; wm.position.set(tx+(tx>0?0.14:-0.14),0.42,w*1.1); g.add(wm);
+        }
+    });
+
+    // Turret group — rotates on Y (traverse)
+    playerTurretGroup = new THREE.Group();
+    playerTurretGroup.position.set(0,1.55,-0.3);
+    g.add(playerTurretGroup);
+
+    var tbase = new THREE.Mesh(new THREE.CylinderGeometry(1.1,1.2,0.35,8), steel);
+    playerTurretGroup.add(tbase);
+
+    var turretBox = new THREE.Mesh(new THREE.BoxGeometry(2.0,0.85,2.6), steel);
+    turretBox.position.set(0,0.45,0); turretBox.castShadow=true;
+    playerTurretGroup.add(turretBox);
+
+    // Barrel group — rotates on X (elevation)
+    playerBarrelGroup = new THREE.Group();
+    playerBarrelGroup.position.set(0,0.55,0.9);
+    playerTurretGroup.add(playerBarrelGroup);
+
+    var mantlet = new THREE.Mesh(new THREE.SphereGeometry(0.56,8,6), dark);
+    mantlet.scale.set(1,0.8,0.6); playerBarrelGroup.add(mantlet);
+
+    var barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.1,0.12,3.8,8), dark);
+    barrel.rotation.x=Math.PI/2; barrel.position.z=1.9; barrel.castShadow=true;
+    playerBarrelGroup.add(barrel);
+
+    // Tilt hull to terrain slope
+    var PS=1.5;
+    var phF=getTerrainHeight(x,z-PS), phB=getTerrainHeight(x,z+PS);
+    var phL=getTerrainHeight(x-PS,z), phR=getTerrainHeight(x+PS,z);
+    g.rotation.x=Math.atan2(phF-phB,2*PS);
+    g.rotation.z=Math.atan2(phR-phL,2*PS);
+
+    g.position.set(x,y,z);
+    scene3D.add(g);
+    playerTankGroup=g;
+}
+
+// ─────────────────────────────────────────────
+// SPAWN QUEUE — tanks enter from map edges
+// ─────────────────────────────────────────────
+var spawnQueue = [];   // [{x,z,delay}]
+var spawnTimer = 0;
+var SPAWN_EDGE = 160;  // how far out tanks spawn
+
+// Fixed entry corridors so tanks drive in from believable off-map positions
+var ENTRY_CORRIDORS = [
+    { sx:-10, sz:-SPAWN_EDGE, label:'north-centre' },
+    { sx:-40, sz:-SPAWN_EDGE, label:'north-left' },
+    { sx: 25, sz:-SPAWN_EDGE, label:'north-right' },
+    { sx:-SPAWN_EDGE, sz:-80,  label:'west-flank' },
+    { sx: SPAWN_EDGE, sz:-80,  label:'east-flank' },
+    { sx:-SPAWN_EDGE, sz:-130, label:'west-deep' },
+    { sx: SPAWN_EDGE, sz:-130, label:'east-deep' }
+];
+
+function queueWave(count, baseDelay) {
+    // Pick corridors for this wave, stagger arrivals
+    var shuffled = ENTRY_CORRIDORS.slice().sort(function(){ return Math.random()-0.5; });
+    for (var i=0; i<count; i++) {
+        var cor = shuffled[i % shuffled.length];
+        spawnQueue.push({
+            x: cor.sx + rnd(-8,8),
+            z: cor.sz,
+            delay: spawnTimer + baseDelay + i * rnd(2,5)   // absolute time
+        });
+    }
+}
+
+// ─────────────────────────────────────────────
+// ENEMY TANKS  (detailed internal components)
+// ─────────────────────────────────────────────
+function spawnEnemyTank(x,z) {
+    var g = new THREE.Group();
+
+    // ── Materials ──
+    var steelMat  = new THREE.MeshLambertMaterial({color:0x5a6040});  // exterior armour
+    var darkMat   = new THREE.MeshLambertMaterial({color:0x3a4030});  // dark detail
+    var trackMat  = new THREE.MeshLambertMaterial({color:0x2a2820});  // rubber/steel tracks
+    var exhaustMat= new THREE.MeshLambertMaterial({color:0x222018});  // exhaust pipes
+    var ammoMat   = new THREE.MeshLambertMaterial({color:0x886030});  // brass ammo shells
+    var engineMat = new THREE.MeshLambertMaterial({color:0x303828});  // engine block
+    var wheelMat  = new THREE.MeshLambertMaterial({color:0x242018});  // road wheels
+    var hatchMat  = new THREE.MeshLambertMaterial({color:0x4e5838});  // hatches
+
+    // ── HULL ──
+    var hull = new THREE.Mesh(new THREE.BoxGeometry(3.6,1.0,5.5), steelMat);
+    hull.position.y=0.9; hull.castShadow=true; g.add(hull);
+
+    // Sloped front plate
+    var frontPlate = new THREE.Mesh(new THREE.BoxGeometry(3.5,0.95,0.15), steelMat);
+    frontPlate.position.set(0,1.0,2.76); frontPlate.rotation.x=0.42; g.add(frontPlate);
+
+    // Rear plate
+    var rearPlate = new THREE.Mesh(new THREE.BoxGeometry(3.5,0.9,0.15), steelMat);
+    rearPlate.position.set(0,0.95,-2.76); g.add(rearPlate);
+
+    // Hull side skirts (Schürzen)
+    [-1.85,1.85].forEach(function(sx){
+        var skirt = new THREE.Mesh(new THREE.BoxGeometry(0.06,0.5,5.2), darkMat);
+        skirt.position.set(sx,0.65,0); g.add(skirt);
+    });
+
+    // ── INTERNAL COMPONENTS (visible inside hull bounds) ──
+
+    // Engine block — rear of hull
+    var engine = new THREE.Mesh(new THREE.BoxGeometry(2.2,0.6,1.8), engineMat);
+    engine.position.set(0,0.75,-1.4); g.add(engine);
+    // Engine cylinders
+    for (var ec=0; ec<4; ec++) {
+        var cyl = new THREE.Mesh(new THREE.CylinderGeometry(0.12,0.12,0.5,6), engineMat);
+        cyl.position.set(-0.7+ec*0.46, 1.1, -1.4); g.add(cyl);
+    }
+
+    // Exhaust pipes — rear right
+    for (var ep=0; ep<2; ep++) {
+        var pipe = new THREE.Mesh(new THREE.CylinderGeometry(0.07,0.07,0.9,6), exhaustMat);
+        pipe.rotation.x=Math.PI/2; pipe.position.set(1.2+ep*0.22, 1.0, -2.9); g.add(pipe);
+    }
+
+    // Ammo rack — right side of hull (3 shell stacks)
+    for (var ar=0; ar<6; ar++) {
+        var shell3d = new THREE.Mesh(new THREE.CylinderGeometry(0.06,0.06,0.55,6), ammoMat);
+        shell3d.position.set(1.4, 0.55 + Math.floor(ar/3)*0.42, -0.5 + (ar%3)*0.38);
+        g.add(shell3d);
+    }
+    // Ammo rack label zone (used in armour to flag ammo hit)
+    g.userData.ammoRackLocalX = 1.4;
+
+    // Driver position — front left
+    var driverSeat = new THREE.Mesh(new THREE.BoxGeometry(0.5,0.3,0.5), darkMat);
+    driverSeat.position.set(-0.9,0.7,1.8); g.add(driverSeat);
+
+    // Transmission hump — front centre
+    var trans = new THREE.Mesh(new THREE.BoxGeometry(0.6,0.35,1.0), engineMat);
+    trans.position.set(0,0.6,2.0); g.add(trans);
+
+    // ── TRACKS & RUNNING GEAR ──
+    [-1.9,1.9].forEach(function(tx){
+        // Track body
+        var trk = new THREE.Mesh(new THREE.BoxGeometry(0.4,0.62,5.8), trackMat);
+        trk.position.set(tx,0.42,0); g.add(trk);
+
+        // Drive sprocket (front)
+        var sprF = new THREE.Mesh(new THREE.CylinderGeometry(0.42,0.42,0.28,10), wheelMat);
+        sprF.rotation.z=Math.PI/2; sprF.position.set(tx+(tx>0?0.14:-0.14),0.42,2.6); g.add(sprF);
+        // Idler wheel (rear)
+        var idler = new THREE.Mesh(new THREE.CylinderGeometry(0.38,0.38,0.28,10), wheelMat);
+        idler.rotation.z=Math.PI/2; idler.position.set(tx+(tx>0?0.14:-0.14),0.42,-2.6); g.add(idler);
+        // Road wheels (5 per side)
+        for (var w=0; w<5; w++) {
+            var rw = new THREE.Mesh(new THREE.CylinderGeometry(0.35,0.35,0.22,8), wheelMat);
+            rw.rotation.z=Math.PI/2; rw.position.set(tx+(tx>0?0.14:-0.14),0.38,-1.8+w*0.9); g.add(rw);
+            // Wheel hub
+            var hub = new THREE.Mesh(new THREE.CylinderGeometry(0.1,0.1,0.26,6), darkMat);
+            hub.rotation.z=Math.PI/2; hub.position.set(tx+(tx>0?0.18:-0.18),0.38,-1.8+w*0.9); g.add(hub);
+        }
+        // Return rollers (3 per side)
+        for (var rr=0; rr<3; rr++) {
+            var rol = new THREE.Mesh(new THREE.CylinderGeometry(0.14,0.14,0.18,6), wheelMat);
+            rol.rotation.z=Math.PI/2; rol.position.set(tx+(tx>0?0.14:-0.14),0.95,-1.2+rr*1.1); g.add(rol);
+        }
+    });
+
+    // ── TURRET ──
+    var turretGroup = new THREE.Group();
+    turretGroup.position.set(0,1.55,-0.3);
+    g.add(turretGroup);
+
+    // Turret ring
+    var tRing = new THREE.Mesh(new THREE.CylinderGeometry(1.15,1.25,0.18,12), steelMat);
+    turretGroup.add(tRing);
+
+    // Turret body
+    var turretBody = new THREE.Mesh(new THREE.BoxGeometry(2.0,0.85,2.5), steelMat);
+    turretBody.position.set(0,0.45,0); turretBody.castShadow=true; turretGroup.add(turretBody);
+
+    // Turret rear bustle (stowage)
+    var bustle = new THREE.Mesh(new THREE.BoxGeometry(1.4,0.45,0.5), steelMat);
+    bustle.position.set(0,0.35,-1.4); turretGroup.add(bustle);
+
+    // Commander's cupola
+    var cupola = new THREE.Mesh(new THREE.CylinderGeometry(0.28,0.32,0.35,8), steelMat);
+    cupola.position.set(-0.45,0.95,-0.4); turretGroup.add(cupola);
+    // Cupola hatch
+    var cupolaHatch = new THREE.Mesh(new THREE.CylinderGeometry(0.27,0.27,0.06,8), hatchMat);
+    cupolaHatch.position.set(-0.45,1.16,-0.4); turretGroup.add(cupolaHatch);
+    // Vision blocks around cupola
+    for (var vb=0; vb<5; vb++) {
+        var vba = vb*(Math.PI*2/5);
+        var vis = new THREE.Mesh(new THREE.BoxGeometry(0.1,0.08,0.06), darkMat);
+        vis.position.set(-0.45+Math.sin(vba)*0.32, 1.05, -0.4+Math.cos(vba)*0.32);
+        turretGroup.add(vis);
+    }
+
+    // Loader's hatch
+    var loaderHatch = new THREE.Mesh(new THREE.BoxGeometry(0.45,0.06,0.5), hatchMat);
+    loaderHatch.position.set(0.5,0.9,0.2); turretGroup.add(loaderHatch);
+
+    // Turret internal ammo (2 ready rounds visible through mantlet gap)
+    for (var ta=0; ta<2; ta++) {
+        var tShell = new THREE.Mesh(new THREE.CylinderGeometry(0.05,0.05,0.48,6), ammoMat);
+        tShell.position.set(0.55,0.35+ta*0.28,0.4); turretGroup.add(tShell);
+    }
+
+    // Mantlet
+    var mantlet = new THREE.Mesh(new THREE.SphereGeometry(0.56,8,6), darkMat);
+    mantlet.scale.set(1,0.75,0.55); mantlet.position.set(0,0.45,1.0); turretGroup.add(mantlet);
+
+    // Gun barrel
+    var barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.09,0.11,3.8,8), darkMat);
+    barrel.rotation.x=Math.PI/2; barrel.position.set(0,0.45,2.9); barrel.castShadow=true;
+    turretGroup.add(barrel);
+    // Muzzle brake
+    var muzzle = new THREE.Mesh(new THREE.CylinderGeometry(0.13,0.13,0.25,8), darkMat);
+    muzzle.rotation.x=Math.PI/2; muzzle.position.set(0,0.45,4.8); turretGroup.add(muzzle);
+
+    // Hull machine gun (front right)
+    var hmg = new THREE.Mesh(new THREE.CylinderGeometry(0.04,0.04,0.6,6), darkMat);
+    hmg.rotation.x=Math.PI/2; hmg.position.set(0.8,1.05,2.85); g.add(hmg);
+
+    // Tow cables
+    var cableMat = new THREE.MeshLambertMaterial({color:0x554433});
+    var cable = new THREE.Mesh(new THREE.CylinderGeometry(0.035,0.035,3.2,5), cableMat);
+    cable.rotation.z=Math.PI/2; cable.position.set(0,1.38,1.8); g.add(cable);
+
+    // Spare track links on hull front
+    for (var st=0; st<4; st++) {
+        var stl = new THREE.Mesh(new THREE.BoxGeometry(0.38,0.14,0.12), trackMat);
+        stl.position.set(-0.7+st*0.46, 1.3, 2.76); g.add(stl);
+    }
+
+    // ── Compute facing angle toward player hill from spawn ──
+    var dx = HILL_X-x, dz = HILL_Z-z;
+    var ry = Math.atan2(dx,dz);
+
+    g.position.set(x, getTerrainHeight(x,z), z);
+    g.rotation.y = ry;
+    g.userData = {
+        alive:true, speed:rnd(0.007,0.018),
+        wobble:rnd(0,Math.PI*2), wobbleSpeed:rnd(0.25,0.6),
+        fireTimer: rnd(2, 6) // seconds until first shot
+    };
+    scene3D.add(g);
+    enemyMeshes.push(g);
+}
+
+// ─────────────────────────────────────────────
+// FIRING
+// ─────────────────────────────────────────────
+function fireBullet() {
+    var shell = SHELLS[currentShellIdx];
+    if (!isLoaded || reloading || shellAmmo[currentShellIdx]<=0) return;
+    isLoaded=false; shellAmmo[currentShellIdx]--; updateShellHUD();
+
+    var bullet = new THREE.Mesh(
+        new THREE.SphereGeometry(0.1,6,6),
+        new THREE.MeshBasicMaterial({color:shell.color})
+    );
+    bullet.position.copy(camera3D.position);
+    var dir = new THREE.Vector3(0,0,-1).applyQuaternion(camera3D.quaternion);
+    bullet.userData = {velocity:dir.multiplyScalar(shell.speed), life:0, maxLife:240, splash:shell.splash, isSmoke:(shell.name==='SMOKE')};
+    scene3D.add(bullet); bullets.push(bullet);
+
+    // Muzzle flash
+    var fl=document.getElementById('fire-flash');
+    fl.classList.add('flash'); setTimeout(function(){ fl.classList.remove('flash'); },55);
+    var ml=new THREE.PointLight(0xffaa00,12,25); ml.position.copy(camera3D.position);
+    scene3D.add(ml); setTimeout(function(){ scene3D.remove(ml); },85);
+
+    if (shellAmmo[currentShellIdx] <= 0) {
+        document.getElementById('status-display').textContent='STATUS: NO AMMO';
+    } else {
+        // Show shell bar — player must pick a shell type to reload
+        document.getElementById('status-display').textContent='STATUS: SELECT SHELL';
+        document.getElementById('shell-bar').style.display='flex';
+    }
+}
+
+function startReload(time) {
+    reloading=true;
+    document.getElementById('status-display').textContent='STATUS: RELOADING';
+    document.getElementById('reload-bar-wrap').style.display='block';
+    document.getElementById('reload-bar-fill').style.width='0%';
+    var start=performance.now(), dur=(time||2.5)*1000;
+    (function tick(){
+        var pct=Math.min((performance.now()-start)/dur,1)*100;
+        document.getElementById('reload-bar-fill').style.width=pct+'%';
+        if (pct<100) requestAnimationFrame(tick);
+        else {
+            reloading=false; isLoaded=true;
+            document.getElementById('status-display').textContent='STATUS: READY';
+            document.getElementById('reload-bar-wrap').style.display='none';
+        }
+    })();
+}
+
+function checkPenetration(bullet, tank) {
+    // Transform bullet world position into tank local space
+    var localPos = tank.worldToLocal(bullet.position.clone());
+    var shell = SHELLS[currentShellIdx];
+
+    // Test each armour zone
+    for (var z=0; z<ARMOUR_ZONES.length; z++) {
+        var zone = ARMOUR_ZONES[z];
+        // Check bounds
+        var inZ = localPos.z >= zone.zMin && localPos.z <= zone.zMax;
+        var inY = localPos.y >= zone.yMin && localPos.y <= zone.yMax;
+        var inX = zone.sideOnly
+            ? (Math.abs(localPos.x) >= zone.xHalf - 0.6 && Math.abs(localPos.x) <= zone.xHalf + 0.6)
+            : (Math.abs(localPos.x) <= zone.xHalf);
+        if (inZ && inY && inX) {
+            // Angle-of-incidence bonus: hitting the front at an angle increases effective armour
+            // Approximate: if bullet came from in front of tank, effective armour *= 1.0-1.3
+            var tankFwd = new THREE.Vector3(0,0,1).applyQuaternion(tank.quaternion);
+            var bulletDir = bullet.userData.velocity.clone().normalize();
+            var dot = Math.abs(tankFwd.dot(bulletDir)); // 1 = head-on, 0 = perpendicular
+            var effectiveArmour = zone.armour * (1 + dot * 0.35);
+            // Add random variance ±10%
+            effectiveArmour *= (0.9 + Math.random()*0.2);
+            return { zone: zone.label, armour: Math.round(effectiveArmour), pen: shell.pen, penetrated: shell.pen >= effectiveArmour };
+        }
+    }
+    // Hit outside defined zones — treat as side (30mm)
+    return { zone: 'hull side', armour: 30, pen: shell.pen, penetrated: shell.pen >= 30 };
+}
+
+function showPenResult(penetrated, zone, armour, pen) {
+    var log = document.getElementById('kill-log');
+    var entry = document.createElement('div');
+    entry.style.cssText = 'animation:fadeKill 3s forwards;color:'+(penetrated?'rgba(180,255,120,0.9)':'rgba(255,160,40,0.9)');
+    if (penetrated) {
+        entry.textContent = '[PEN] '+zone.toUpperCase()+' — '+pen+'mm vs '+armour+'mm';
+    } else {
+        entry.textContent = '[BOUNCE] '+zone.toUpperCase()+' — '+pen+'mm vs '+armour+'mm';
+        // Ricochet flash
+        var fl = document.getElementById('fire-flash');
+        fl.style.background='rgba(255,160,40,0.2)';
+        setTimeout(function(){ fl.style.background='rgba(255,220,80,0)'; }, 120);
+    }
+    log.appendChild(entry);
+    setTimeout(function(){ if(entry.parentNode) entry.parentNode.removeChild(entry); }, 3000);
+}
+
+function registerKill(tank, zone) {
+    tank.userData.alive=false; kills++;
+    document.getElementById('kills-display').textContent='KILLS  : '+kills;
+    createExplosion(tank.position); scene3D.remove(tank);
+
+    var dist=Math.round(Math.sqrt(
+        Math.pow(tank.position.x-HILL_X,2)+Math.pow(tank.position.z-HILL_Z,2)
+    ));
+    var entry=document.createElement('div'); entry.className='kill-entry';
+    entry.textContent='[KILL] PANZER IV — '+dist+'m — '+SHELLS[currentShellIdx].name+(zone?' ('+zone+')':'');
+    document.getElementById('kill-log').appendChild(entry);
+    setTimeout(function(){ if(entry.parentNode) entry.parentNode.removeChild(entry); },4000);
+
+    var hm=document.getElementById('hit-marker'); hm.classList.add('show');
+    setTimeout(function(){ hm.classList.remove('show'); },320);
+}
+
+function createSmokeCloud(pos) {
+    var SMOKE_RADIUS = 12;
+    var SMOKE_LIFE   = 600; // frames (~10s at 60fps)
+    var group = new THREE.Group();
+    var mat = new THREE.MeshBasicMaterial({color:0xaaaaaa, transparent:true, opacity:0.45});
+    // Several overlapping spheres for a billowy cloud
+    var offsets = [{x:0,y:0,z:0},{x:3,y:1,z:2},{x:-3,y:1,z:-2},{x:1,y:2,z:-3},{x:-2,y:2,z:3}];
+    for (var o=0; o<offsets.length; o++) {
+        var r = SMOKE_RADIUS * (0.6 + Math.random()*0.5);
+        var sp = new THREE.Mesh(new THREE.SphereGeometry(r,8,6), mat.clone());
+        sp.position.set(offsets[o].x, offsets[o].y + r*0.4, offsets[o].z);
+        group.add(sp);
+    }
+    var gy = getTerrainHeight(pos.x, pos.z);
+    group.position.set(pos.x, gy, pos.z);
+    scene3D.add(group);
+    smokeClouds.push({ x:pos.x, z:pos.z, radius:SMOKE_RADIUS, life:SMOKE_LIFE, maxLife:SMOKE_LIFE, mesh:group });
+}
+
+function takeDamage(amt) {
+    playerHealth = Math.max(0, playerHealth - amt);
+    document.getElementById('health-bar-fill').style.width = playerHealth + '%';
+    if (playerHealth <= 0) {
+        if (playerTankGroup) createExplosion(playerTankGroup.position);
+        setTimeout(function(){
+            alert("TANK DESTROYED\nFinal Kills: " + kills);
+            exitScene();
+        }, 1500);
+    }
+}
+
+function createExplosion(pos) {
+    var mat=new THREE.MeshBasicMaterial({color:0xff6600,transparent:true,opacity:0.9});
+    var sp=new THREE.Mesh(new THREE.SphereGeometry(0.5,8,8),mat);
+    sp.position.copy(pos); sp.position.y+=1.5; scene3D.add(sp);
+    var lt=new THREE.PointLight(0xff4400,24,48); lt.position.copy(sp.position); scene3D.add(lt);
+    var t=0;
+    (function expand(){
+        t++; var s=1+t*0.28; sp.scale.set(s,s,s);
+        mat.opacity=Math.max(0,0.9-t*0.055); lt.intensity=Math.max(0,24-t*1.4);
+        if (t<22) requestAnimationFrame(expand);
+        else { scene3D.remove(sp); scene3D.remove(lt); }
+    })();
+}
+
+// ─────────────────────────────────────────────
+// AIM MODE
+// ─────────────────────────────────────────────
+function setAiming(on) {
+    isAiming=on;
+    document.getElementById('scope-overlay').classList.toggle('aiming',on);
+    document.getElementById('vignette').classList.toggle('aiming',on);
+    document.getElementById('aim-badge').classList.toggle('show',on);
+    if (camera3D) { camera3D.fov=on?14:55; camera3D.updateProjectionMatrix(); }
+    if (on) document.getElementById('three-canvas').requestPointerLock();
+    else if (document.pointerLockElement) document.exitPointerLock();
+}
+
+// ─────────────────────────────────────────────
+// CONTROLS
+// ─────────────────────────────────────────────
+function onKeyDown(e) {
+    if (!scene3D) return;
+    keysDown[e.code]=true;
+    if (e.repeat) return;
+    if (e.code==='KeyX')   setAiming(!isAiming);
+    if (e.code==='KeyF')   fireBullet();
+    if (e.code==='Escape') exitScene();
+    if (e.code>='Digit1' && e.code<='Digit9') {
+        // Only allow shell selection when the gun is unloaded and shell bar is visible
+        if (!isLoaded && !reloading)
+            selectShell(parseInt(e.code.replace('Digit',''))-1);
+    }
+}
+function onKeyUp(e)   { keysDown[e.code]=false; }
+function onBlur()     { keysDown={}; }
+function onMouseMove(e) {
+    if (!scene3D || !isAiming) return;
+    yaw   -= e.movementX * 0.0014;
+    pitch -= e.movementY * 0.0014;
+    pitch  = Math.max(PITCH_MIN, Math.min(PITCH_MAX, pitch));
+}
+function setupControls() {
+    document.addEventListener('keydown',   onKeyDown);
+    document.addEventListener('keyup',     onKeyUp);
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mousedown', onMouseDown);
+    window.addEventListener('blur',        onBlur);
+}
+
+// ─────────────────────────────────────────────
+// ANIMATION LOOP
+// ─────────────────────────────────────────────
+function animate3D() {
+    animFrameId=requestAnimationFrame(animate3D);
+    var delta=clock3D.getDelta();
+
+    // Spawn queue processing
+    spawnTimer += delta;
+    for (var i=spawnQueue.length-1; i>=0; i--) {
+        var sq = spawnQueue[i];
+        if (spawnTimer >= sq.delay) {
+            spawnEnemyTank(sq.x, sq.z);
+            spawnQueue.splice(i, 1);
+        }
+    }
+
+    // Traverse & elevation (WASD / Arrows — both work)
+    if (keysDown['KeyA']||keysDown['ArrowLeft'])  yaw+=TRAVERSE_SPEED;
+    if (keysDown['KeyD']||keysDown['ArrowRight']) yaw-=TRAVERSE_SPEED;
+    if (keysDown['KeyW']||keysDown['ArrowUp'])    pitch=Math.min(PITCH_MAX,pitch+ELEV_SPEED);
+    if (keysDown['KeyS']||keysDown['ArrowDown'])  pitch=Math.max(PITCH_MIN,pitch-ELEV_SPEED);
+
+    // Apply to camera
+    camera3D.rotation.order='YXZ';
+    camera3D.rotation.y=yaw;
+    camera3D.rotation.x=pitch;
+    camera3D.rotation.z=0;
+
+    // Sync player turret & barrel
+    if (playerTurretGroup && playerTankGroup) 
+        playerTurretGroup.rotation.y = (yaw - playerTankGroup.rotation.y) - Math.PI;
+    if (playerBarrelGroup) 
+        playerBarrelGroup.rotation.x = -pitch - (playerTankGroup ? playerTankGroup.rotation.x : 0);
+
+    // Player movement
+    if (playerTargetPos && playerTankGroup) {
+        var dx = playerTargetPos.x - playerTankGroup.position.x;
+        var dz = playerTargetPos.z - playerTankGroup.position.z;
+        var dist = Math.sqrt(dx*dx + dz*dz);
+        if (dist > 0.2) {
+            var moveX = (dx/dist) * PLAYER_MOVE_SPEED;
+            var moveZ = (dz/dist) * PLAYER_MOVE_SPEED;
+            playerTankGroup.position.x += moveX;
+            playerTankGroup.position.z += moveZ;
+            
+            // Point tank in movement direction
+            playerTankGroup.rotation.y = Math.atan2(dx, dz);
+            
+            var tx = playerTankGroup.position.x, tz = playerTankGroup.position.z;
+            playerTankGroup.position.y = getTerrainHeight(tx, tz);
+            
+            var PS = 1.5;
+            var phF = getTerrainHeight(tx, tz-PS), phB = getTerrainHeight(tx, tz+PS);
+            var phL = getTerrainHeight(tx-PS, tz), phR = getTerrainHeight(tx+PS, tz);
+            playerTankGroup.rotation.x = Math.atan2(phF-phB, 2*PS);
+            playerTankGroup.rotation.z = Math.atan2(phR-phL, 2*PS);
+            
+            HILL_X = tx; HILL_Z = tz;
+        } else {
+            playerTargetPos = null;
+            if (moveBeacon) { scene3D.remove(moveBeacon); moveBeacon = null; }
+        }
+    }
+    if (playerTankGroup) {
+        camera3D.position.x = playerTankGroup.position.x;
+        camera3D.position.z = playerTankGroup.position.z;
+        camera3D.position.y = playerTankGroup.position.y + 3.2;
+    }
+
+    // HUD readouts
+    var deg=(((- yaw*180/Math.PI)%360)+360)%360;
+    document.getElementById('bearing-display').textContent='BRG  : '+Math.round(deg).toString().padStart(3,'0')+'°';
+    var elevDeg=(-pitch*180/Math.PI);
+    document.getElementById('elev-display').textContent='ELEV : '+(elevDeg>=0?'+':'')+elevDeg.toFixed(1)+'°';
+
+    // Smoke cloud fade
+    for (var sc=smokeClouds.length-1; sc>=0; sc--) {
+        var cloud=smokeClouds[sc];
+        cloud.life--;
+        var alpha = (cloud.life/cloud.maxLife)*0.45;
+        for (var cm=0; cm<cloud.mesh.children.length; cm++)
+            cloud.mesh.children[cm].material.opacity = alpha;
+        if (cloud.life<=0) { scene3D.remove(cloud.mesh); smokeClouds.splice(sc,1); }
+    }
+
+    // Enemy movement — advance toward player hill
+    var anyClose=false;
+    for (var i=0; i<enemyMeshes.length; i++) {
+        var tank=enemyMeshes[i];
+        if (!tank.userData.alive) continue;
+
+        // Firing logic
+        tank.userData.fireTimer -= delta;
+        if (tank.userData.fireTimer <= 0) {
+            tank.userData.fireTimer = rnd(4, 8); // reload time
+            var eBullet = new THREE.Mesh(
+                new THREE.SphereGeometry(0.12, 6, 6),
+                new THREE.MeshBasicMaterial({color: 0xff4444})
+            );
+            eBullet.position.copy(tank.position);
+            eBullet.position.y += 2.0; // turret height
+            var target = playerTankGroup.position.clone().add(new THREE.Vector3(0, 1.2, 0));
+            var eDir = target.sub(eBullet.position).normalize();
+            eBullet.userData = { velocity: eDir.multiplyScalar(1.8), life: 0, maxLife: 200 };
+            scene3D.add(eBullet);
+            enemyBullets.push(eBullet);
+            
+            // Muzzle flash for enemy
+            var elt = new THREE.PointLight(0xff4400, 8, 15);
+            elt.position.copy(eBullet.position);
+            scene3D.add(elt);
+            setTimeout(function(){ scene3D.remove(elt); }, 100);
+        }
+
+        tank.userData.wobble += delta*tank.userData.wobbleSpeed;
+        // Steer toward player hill
+        var edx=HILL_X-tank.position.x, edz=HILL_Z-tank.position.z;
+        var edist=Math.sqrt(edx*edx+edz*edz);
+        var emx=0, emz=0;
+        if (edist>6) {
+            emx=(edx/edist)*tank.userData.speed + Math.sin(tank.userData.wobble)*0.008;
+            emz=(edz/edist)*tank.userData.speed;
+        }
+
+        // Smoke avoidance — drive straight out of cloud toward player, avoiding re-entering
+        var inSmoke = false;
+        var smokeExitX = 0, smokeExitZ = 0;
+        for (var sc=0; sc<smokeClouds.length; sc++) {
+            var cloud=smokeClouds[sc];
+            var sdx=tank.position.x-cloud.x, sdz=tank.position.z-cloud.z;
+            var sdist=Math.sqrt(sdx*sdx+sdz*sdz);
+            if (sdist < cloud.radius) {
+                inSmoke = true;
+                // Drive directly away from cloud centre (escape vector)
+                var escLen = sdist > 0.01 ? sdist : 0.01;
+                smokeExitX += (sdx/escLen) * tank.userData.speed * 2.0;
+                smokeExitZ += (sdz/escLen) * tank.userData.speed * 2.0;
+            } else if (sdist < cloud.radius + 8) {
+                // Near edge — steer to go around rather than through
+                var avoidStr = (1 - (sdist-cloud.radius)/8) * tank.userData.speed * 1.5;
+                // Push perpendicular but ONLY add lateral component, keep forward progress
+                var plen = sdist > 0.01 ? sdist : 0.01;
+                emx += (-sdz/plen) * avoidStr;
+                emz += ( sdx/plen) * avoidStr;
+            }
+        }
+        // If inside smoke, override movement with escape vector
+        if (inSmoke) { emx = smokeExitX; emz = smokeExitZ; }
+        tank.position.x+=emx; tank.position.z+=emz;
+
+        // Snap Y to terrain
+        var etx=tank.position.x, etz=tank.position.z;
+        tank.position.y=getTerrainHeight(etx,etz);
+
+        // Tilt to slope
+        var ES=1.5;
+        var ehF=getTerrainHeight(etx,etz-ES), ehB=getTerrainHeight(etx,etz+ES);
+        var ehL=getTerrainHeight(etx-ES,etz), ehR=getTerrainHeight(etx+ES,etz);
+        tank.rotation.x=Math.atan2(ehF-ehB,2*ES);
+        tank.rotation.z=Math.atan2(ehR-ehL,2*ES);
+        if (Math.abs(emx)>0.0001||Math.abs(emz)>0.0001)
+            tank.rotation.y=Math.atan2(emx,emz);
+
+        var distToPlayer=Math.sqrt(
+            Math.pow(tank.position.x-HILL_X,2)+Math.pow(tank.position.z-HILL_Z,2)
+        );
+        if (distToPlayer<80) anyClose=true;
+    }
+    document.getElementById('target-indicator').style.display=anyClose?'block':'none';
+
+    // Bullets
+    for (var b=bullets.length-1; b>=0; b--) {
+        var bullet=bullets[b];
+        bullet.position.add(bullet.userData.velocity);
+        bullet.userData.life++;
+        var bhit=false;
+        // Smoke shells: detonate on ground (when Y near terrain) or max life
+        if (bullet.userData.isSmoke) {
+            var bgy = getTerrainHeight(bullet.position.x, bullet.position.z);
+            if (bullet.position.y <= bgy + 0.5 || bullet.userData.life > bullet.userData.maxLife) {
+                createSmokeCloud(bullet.position);
+                scene3D.remove(bullet); bullets.splice(b,1);
+            }
+            continue;
+        }
+        for (var e=enemyMeshes.length-1; e>=0; e--) {
+            var et=enemyMeshes[e];
+            if (!et.userData.alive) continue;
+            var hitDist = 3.6 + (bullet.userData.splash||0);
+            if (bullet.position.distanceTo(et.position) < hitDist) {
+                var result = checkPenetration(bullet, et);
+                showPenResult(result.penetrated, result.zone, result.armour, result.pen);
+                if (result.penetrated) {
+                    bhit=true; registerKill(et, result.zone); enemyMeshes.splice(e,1);
+                } else {
+                    // Bounce — remove bullet but tank survives
+                    bhit=true;
+                }
+                break;
+            }
+        }
+        if (bhit||bullet.userData.life>bullet.userData.maxLife) {
+            scene3D.remove(bullet); bullets.splice(b,1);
+        }
+    }
+
+    // Enemy Bullets
+    for (var eb=enemyBullets.length-1; eb>=0; eb--) {
+        var ebul = enemyBullets[eb];
+        ebul.position.add(ebul.userData.velocity);
+        ebul.userData.life++;
+        
+        var ehit = false;
+        if (playerTankGroup && ebul.position.distanceTo(playerTankGroup.position) < 3.2) {
+            takeDamage(rnd(15, 25));
+            createExplosion(ebul.position);
+            ehit = true;
+        }
+        
+        if (ehit || ebul.userData.life > ebul.userData.maxLife) {
+            scene3D.remove(ebul);
+            enemyBullets.splice(eb, 1);
+        }
+    }
+
+    // Respawn wave when all dead
+    var alive=enemyMeshes.filter(function(t){ return t.userData.alive; }).length;
+    if (alive===0 && spawnQueue.length===0) {
+        queueWave(5, 4);
+    }
+
+    renderer3D.render(scene3D,camera3D);
+}
+
+function onResize3D() {
+    var W=window.innerWidth, H=window.innerHeight;
+    camera3D.aspect=W/H; camera3D.updateProjectionMatrix(); renderer3D.setSize(W,H);
+}
+</script>
+</body>
+</html>
